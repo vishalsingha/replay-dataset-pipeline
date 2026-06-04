@@ -31,7 +31,12 @@ from src.utils import (
 )
 
 
-def generate_multiturn(config_path: str, resume: bool = False) -> None:
+def generate_multiturn(
+    config_path: str,
+    instructions_override: str | None = None,
+    output_override: str | None = None,
+    resume: bool = False,
+) -> None:
     cfg = load_and_validate_config(config_path)
     log = setup_logging(cfg.get("log_level", "INFO"))
 
@@ -46,8 +51,8 @@ def generate_multiturn(config_path: str, resume: bool = False) -> None:
     seed = cfg.get("seed", 42)
     stop_tokens = cfg.get("stop_tokens", ["<|im_end|>", "<|endoftext|>", "<|im_start|>assistant"])
 
-    instructions_path = Path(cfg["paths"]["instructions"])
-    output_path = Path(cfg["paths"]["multiturn"])
+    instructions_path = Path(instructions_override) if instructions_override else Path(cfg["paths"]["instructions"])
+    output_path = Path(output_override) if output_override else Path(cfg["paths"]["multiturn"])
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     log.info("Loading instructions...")
@@ -218,9 +223,11 @@ def generate_multiturn(config_path: str, resume: bool = False) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Step 1b: Generate multi-turn conversations")
     parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--instructions", default=None, help="Override input instructions JSONL path")
+    parser.add_argument("--output", default=None, help="Override output multi-turn JSONL path")
     parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
     args = parser.parse_args()
-    generate_multiturn(args.config, resume=args.resume)
+    generate_multiturn(args.config, instructions_override=args.instructions, output_override=args.output, resume=args.resume)
 
 
 if __name__ == "__main__":

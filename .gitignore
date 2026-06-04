@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+venv/
+
+# Data (generated, large files — not tracked)
+data/
+
+# Docs build output
+docs/_build/
+
+# Checkpoint/progress files
+*.progress
+*.source_progress.json
+*.raw.jsonl
+*.tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env

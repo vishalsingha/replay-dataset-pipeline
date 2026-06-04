@@ -1,0 +1,136 @@
+model: Qwen/Qwen3-4B-Instruct-2507
+tensor_parallel_size: 2    # number of GPUs for vLLM tensor parallelism
+seed: 42                   # global seed for reproducibility across all steps
+
+# --- Deduplication Settings ---
+dedupe:
+  minhash_threshold: 0.7   # MinHash LSH similarity threshold for near-dup removal
+  minhash_num_perm: 128    # number of permutations for MinHash
+
+# --- Stop Tokens (model-specific) ---
+# Used in instruction generation and multi-turn follow-up generation.
+# Change these if switching to a non-Qwen model.
+stop_tokens:
+  - "<|im_end|>"
+  - "<|endoftext|>"
+  - "<|im_start|>assistant"
+
+# --- Step 1: Instruction Generation ---
+instruction_generation:
+  n: 150000            # total raw instructions to generate (before dedupe)
+  quick_n: 1000        # N used when --quick flag is passed
+  chunk_size: 5000     # instructions per checkpoint flush
+  sampling:
+    temperature: 1.0
+    top_p: 0.98
+    top_k: 50
+    max_tokens: 512    # instructions are short
+  min_length: 10       # drop instructions shorter than this (chars)
+  max_length: 2048     # drop instructions longer than this (chars)
+
+# --- Step 2: Multi-Response Generation ---
+response_generation:
+  L: 3                 # candidates per generator per instruction
+  chunk_size: 1000     # instructions per checkpoint flush
+  sampling:
+    temperature: 0.7
+    top_p: 0.8
+    top_k: 20
+    min_p: 0.0
+    max_tokens: 16384
+    presence_penalty: 0.5
+
+# --- Step 3: Filtering ---
+filtering:
+  chunk_size: 1000     # candidates per checkpoint flush
+  min_score: 3.0       # drop instructions whose best candidate scores below this
+  sampling:
+    temperature: 0.3   # judges should be more deterministic
+    top_p: 0.9
+    top_k: 20
+    max_tokens: 512    # rubric justification + score
+
+# --- Committee (pluggable) ---
+committee:
+  generators:
+    - type: vllm_local
+      model: Qwen/Qwen3-4B-Instruct-2507
+  judges:
+    - type: vllm_local
+      model: Qwen/Qwen3-4B-Instruct-2507
+
+# --- System Prompt Strategy (Option 2: diverse pool) ---
+replay_system_prompts:
+  - prompt: ""
+    weight: 3
+  - prompt: "You are a helpful assistant."
+    weight: 2
+  - prompt: "You are a concise and accurate expert. Answer directly and clearly."
+    weight: 1
+  - prompt: "You are a friendly tutor who explains concepts step by step."
+    weight: 1
+  - prompt: "You are a skilled software engineer. Write clean, well-documented code."
+    weight: 1
+  - prompt: "You are a professional translator. Translate accurately and naturally."
+    weight: 1
+  - prompt: "You are a creative writing assistant. Be vivid and imaginative."
+    weight: 1
+
+# --- Public Instructions Pipeline ---
+public_instructions:
+  min_length: 10
+  max_length: 2048
+  sources:
+    - dataset: Open-Orca/OpenOrca
+      split: train
+      n: 8000
+      streaming: true
+    - dataset: teknium/OpenHermes-2.5
+      split: train
+      n: 5000
+      streaming: true
+    - dataset: HuggingFaceH4/ultrachat_200k
+      split: train_sft
+      n: 3000
+      streaming: true
+    - dataset: m-a-p/CodeFeedback-Filtered-Instruction
+      split: train
+      n: 1500
+      streaming: true
+    - dataset: TIGER-Lab/MathInstruct
+      split: train
+      n: 1000
+      streaming: true
+
+# --- Step 1b: Multi-Turn Generation ---
+multiturn:
+  fraction: 0.3
+  min_turns: 2
+  max_turns: 5
+  chunk_size: 500
+  followup_sampling:
+    temperature: 0.9
+    top_p: 0.95
+    top_k: 30
+    max_tokens: 512
+
+# --- Stage 2: Mixing ---
+mixing:
+  domain_fraction: 0.17
+  domain_data_path: "PLACEHOLDER — set this to your domain dataset .jsonl path"
+  val_fraction: 0.0
+  seed: 42
+
+# --- Paths ---
+paths:
+  instructions: data/instructions/instructions.jsonl
+  public_instructions: data/public_instructions/instructions.jsonl
+  candidates: data/candidates/candidates.jsonl
+  replay: data/replay/replay.jsonl
+  public_replay: data/public_instructions/replay.jsonl
+  multiturn: data/multiturn/multiturn.jsonl
+  train: data/final/train.jsonl
+  val: data/final/val.jsonl
+
+# --- Logging ---
+log_level: INFO    # DEBUG, INFO, WARNING, ERROR

@@ -1,0 +1,8 @@
+vllm
+transformers
+datasets
+datasketch
+openai
+pydantic
+pyyaml
+tqdm

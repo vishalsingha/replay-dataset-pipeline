@@ -6,7 +6,7 @@ Instead of mixing public SFT datasets (which are distributionally mismatched), t
 
 **Target model:** `Qwen/Qwen3-4B-Instruct-2507`
 
-**Documentation:** https://vishalsingha.github.io/vishalsingha-replay-dataset-pipeline/
+**Documentation:** https://vishalsingha.github.io/replay-dataset-pipeline/
 
 ---
 

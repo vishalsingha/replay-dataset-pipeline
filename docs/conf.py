@@ -27,7 +27,7 @@ templates_path = ["_templates"]
 exclude_patterns = ["_build"]
 
 html_theme = "sphinx_rtd_theme"
-html_baseurl = "https://vishalsingha.github.io/vishalsingha-replay-dataset-pipeline/"
+html_baseurl = "https://vishalsingha.github.io/replay-dataset-pipeline/"
 html_static_path = ["_static"]
 html_theme_options = {
     "navigation_depth": 4,

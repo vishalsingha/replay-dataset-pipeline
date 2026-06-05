@@ -1,5 +1,5 @@
 model: Qwen/Qwen3-4B-Instruct-2507
-tensor_parallel_size: 2    # number of GPUs for vLLM tensor parallelism
+tensor_parallel_size: 1    # number of GPUs for vLLM tensor parallelism
 seed: 42                   # global seed for reproducibility across all steps
 
 # --- Deduplication Settings ---
@@ -8,8 +8,8 @@ dedupe:
   minhash_num_perm: 128    # number of permutations for MinHash
 
 # --- Stop Tokens (model-specific) ---
-# Used in instruction generation and multi-turn follow-up generation.
-# Change these if switching to a non-Qwen model.
+# Used in multi-turn follow-up generation.
+# Change these if switching models.
 stop_tokens:
   - "<|im_end|>"
   - "<|endoftext|>"
@@ -17,23 +17,23 @@ stop_tokens:
 
 # --- Step 1: Instruction Generation ---
 instruction_generation:
-  n: 150000            # total raw instructions to generate (before dedupe)
-  quick_n: 1000        # N used when --quick flag is passed
+  n: 100000            # total raw instructions to generate (before dedupe)
+  quick_n: 100        # N used when --quick flag is passed
   chunk_size: 5000     # instructions per checkpoint flush
   sampling:
     temperature: 1.0
     top_p: 0.98
     top_k: 50
-    max_tokens: 512    # instructions are short
+    max_tokens: 1024    # instructions are short
   min_length: 10       # drop instructions shorter than this (chars)
   max_length: 2048     # drop instructions longer than this (chars)
 
 # --- Step 2: Multi-Response Generation ---
 response_generation:
   L: 3                 # candidates per generator per instruction
-  chunk_size: 1000     # instructions per checkpoint flush
+  chunk_size: 20000     # instructions per checkpoint flush
   sampling:
-    temperature: 0.7
+    temperature: 1.0
     top_p: 0.8
     top_k: 20
     min_p: 0.0
@@ -42,7 +42,7 @@ response_generation:
 
 # --- Step 3: Filtering ---
 filtering:
-  chunk_size: 1000     # candidates per checkpoint flush
+  chunk_size: 5000     # candidates per checkpoint flush
   min_score: 3.0       # drop instructions whose best candidate scores below this
   sampling:
     temperature: 0.3   # judges should be more deterministic
@@ -61,10 +61,10 @@ committee:
 
 # --- System Prompt Strategy (Option 2: diverse pool) ---
 replay_system_prompts:
-  - prompt: ""
-    weight: 3
   - prompt: "You are a helpful assistant."
     weight: 2
+  - prompt: "You are a helpful assistant."
+    weight: 4
   - prompt: "You are a concise and accurate expert. Answer directly and clearly."
     weight: 1
   - prompt: "You are a friendly tutor who explains concepts step by step."
@@ -107,7 +107,7 @@ multiturn:
   fraction: 0.3
   min_turns: 2
   max_turns: 5
-  chunk_size: 500
+  chunk_size: 5000
   followup_sampling:
     temperature: 0.9
     top_p: 0.95
@@ -123,12 +123,14 @@ mixing:
 
 # --- Paths ---
 paths:
-  instructions: data/instructions/instructions.jsonl
-  public_instructions: data/public_instructions/instructions.jsonl
-  candidates: data/candidates/candidates.jsonl
+  instructions: data/replay/instructions.jsonl
+  candidates: data/replay/candidates.jsonl
+  multiturn: data/replay/multiturn.jsonl
   replay: data/replay/replay.jsonl
+
+  public_instructions: data/public_instructions/instructions.jsonl
   public_replay: data/public_instructions/replay.jsonl
-  multiturn: data/multiturn/multiturn.jsonl
+  
   train: data/final/train.jsonl
   val: data/final/val.jsonl
 

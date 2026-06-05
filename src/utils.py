@@ -267,12 +267,18 @@ def dedupe_exact(instructions: list[str]) -> list[str]:
 
 def dedupe_minhash(instructions: list[str], threshold: float = 0.7, num_perm: int = 128) -> list[str]:
     """Near-duplicate removal via MinHash LSH."""
+    kept_indices = dedupe_minhash_indices(instructions, threshold=threshold, num_perm=num_perm)
+    return [instructions[i] for i in kept_indices]
+
+
+def dedupe_minhash_indices(instructions: list[str], threshold: float = 0.7, num_perm: int = 128) -> list[int]:
+    """Near-duplicate removal via MinHash LSH — returns kept indices."""
     lsh = MinHashLSH(threshold=threshold, num_perm=num_perm)
-    keep: list[str] = []
+    keep: list[int] = []
     for idx, inst in enumerate(tqdm(instructions, desc="MinHash dedupe")):
         tokens = normalize_text(inst).split()
         if len(tokens) < 3:
-            keep.append(inst)
+            keep.append(idx)
             continue
         mh = MinHash(num_perm=num_perm)
         for token in tokens:
@@ -280,7 +286,7 @@ def dedupe_minhash(instructions: list[str], threshold: float = 0.7, num_perm: in
         key = f"inst_{idx}"
         if not lsh.query(mh):
             lsh.insert(key, mh)
-            keep.append(inst)
+            keep.append(idx)
     return keep
 
 
@@ -312,7 +318,7 @@ def sample_system_prompt(pool: list[dict]) -> str:
 SPLIT_MARKER = "<<__REPLAY_SPLIT_MARKER__>>"
 
 
-def build_prequery_prefix(tokenizer) -> str:
+def build_prequery_prefix(tokenizer, system_prompt: str | None = None) -> str:
     """Build the raw text prefix ending at the user-turn content start.
 
     Uses a dummy marker to find the split point in the rendered chat
@@ -320,13 +326,18 @@ def build_prequery_prefix(tokenizer) -> str:
 
     Args:
         tokenizer: HuggingFace tokenizer with ``apply_chat_template``.
+        system_prompt: If provided, prepend a system turn before the user turn.
+            Use ``None`` or ``""`` to omit the system turn entirely.
 
     Returns:
         The template prefix string up to where user content begins.
     """
-    dummy = [{"role": "user", "content": SPLIT_MARKER}]
+    messages: list[dict[str, str]] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": SPLIT_MARKER})
     full_text = tokenizer.apply_chat_template(
-        dummy, tokenize=False, add_generation_prompt=False
+        messages, tokenize=False, add_generation_prompt=False
     )
     return full_text.split(SPLIT_MARKER)[0]
 
@@ -350,24 +361,3 @@ def build_user_turn_prefix(tokenizer, conversation: list[dict[str, str]]) -> str
     )
     return full_text.split(SPLIT_MARKER)[0]
 
-
-def extract_instruction(raw_text: str) -> str:
-    """Extract just the user instruction from raw model output.
-
-    Truncates at assistant-turn markers and special tokens to isolate
-    the instruction portion.
-
-    Args:
-        raw_text: Raw text output from the model.
-
-    Returns:
-        Cleaned instruction string.
-    """
-    for marker in ["<|im_start|>assistant", "<|im_start|>system", "\nassistant\n"]:
-        idx = raw_text.find(marker)
-        if idx != -1:
-            raw_text = raw_text[:idx]
-    idx = raw_text.find("<|im_end|>")
-    if idx != -1:
-        raw_text = raw_text[:idx]
-    return raw_text.strip()

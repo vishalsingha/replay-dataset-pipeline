@@ -25,7 +25,6 @@ from src.utils import (
     extract_instruction,
     load_jsonl,
     read_progress,
-    sample_system_prompt,
     truncate_file,
     write_progress,
 )
@@ -47,7 +46,6 @@ def generate_multiturn(
     chunk_size = mcfg.get("chunk_size", 500)
     samp_resp = cfg["response_generation"]["sampling"]
     samp_followup = mcfg.get("followup_sampling", {})
-    system_prompt_pool = cfg["replay_system_prompts"]
     seed = cfg.get("seed", 42)
     stop_tokens = cfg.get("stop_tokens", ["<|im_end|>", "<|endoftext|>", "<|im_start|>assistant"])
 
@@ -56,25 +54,22 @@ def generate_multiturn(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     log.info("Loading instructions...")
-    raw = load_jsonl(instructions_path, required_key="instruction")
-    instructions = [d["instruction"] for d in raw]
-    log.info(f"Loaded {len(instructions)} instructions")
+    entries = load_jsonl(instructions_path, required_key="messages")
+    log.info(f"Loaded {len(entries)} instructions")
 
-    if not instructions:
+    if not entries:
         log.error("No instructions found. Run Step 1 first.")
         return
 
-    # #18: fraction=0 means no multi-turn
     random.seed(seed)
-    n_multiturn = int(len(instructions) * fraction)
+    n_multiturn = int(len(entries) * fraction)
     if n_multiturn <= 0:
         log.info("multiturn.fraction=0 → no multi-turn conversations to generate.")
         return
 
-    selected = random.sample(instructions, min(n_multiturn, len(instructions)))
+    selected = random.sample(entries, min(n_multiturn, len(entries)))
     log.info(f"Selected {len(selected)} instructions for multi-turn extension")
 
-    sampled_sys_prompts = [sample_system_prompt(system_prompt_pool) for _ in selected]
     turn_counts = [random.randint(min_turns, max_turns) for _ in selected]
 
     # --- Checkpoint: #8 use .progress file (output lines != input count due to drops) ---
@@ -92,7 +87,6 @@ def generate_multiturn(
         return
 
     remaining_selected = selected[done:]
-    remaining_sys = sampled_sys_prompts[done:]
     remaining_turns = turn_counts[done:]
 
     # #9-10: require vllm_local (needs tokenizer + generate_raw)
@@ -133,18 +127,14 @@ def generate_multiturn(
 
     for chunk_start in range(0, len(remaining_selected), chunk_size):
         chunk_end = min(chunk_start + chunk_size, len(remaining_selected))
-        chunk_inst = remaining_selected[chunk_start:chunk_end]
-        chunk_sys = remaining_sys[chunk_start:chunk_end]
+        chunk_entries = remaining_selected[chunk_start:chunk_end]
         chunk_turns = list(remaining_turns[chunk_start:chunk_end])
         chunk_num = chunk_start // chunk_size + 1
 
-        conversations: list[list[dict[str, str]]] = []
-        for inst, sys_prompt in zip(chunk_inst, chunk_sys):
-            messages: list[dict[str, str]] = []
-            if sys_prompt:
-                messages.append({"role": "system", "content": sys_prompt})
-            messages.append({"role": "user", "content": inst})
-            conversations.append(messages)
+        # Start each conversation from the stored messages (system + user).
+        conversations: list[list[dict[str, str]]] = [
+            list(e["messages"]) for e in chunk_entries
+        ]
 
         max_needed = max(chunk_turns) if chunk_turns else 0
         current_turn = 1

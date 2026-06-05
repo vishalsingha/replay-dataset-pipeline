@@ -100,9 +100,13 @@ def filter_responses(
             flat_index: list[tuple[int, int]] = []
             conversations: list[list[dict[str, str]]] = []
             for e_idx, entry in enumerate(chunk):
+                user_content = next(
+                    (m["content"] for m in entry.get("messages", []) if m["role"] == "user"),
+                    entry.get("instruction", ""),
+                )
                 for c_idx, cand in enumerate(entry["candidates"]):
                     prompt = format_judge_prompt(
-                        instruction=entry.get("instruction", ""),
+                        instruction=user_content,
                         response=cand.get("text", ""),
                     )
                     conversations.append([{"role": "user", "content": prompt}])
@@ -153,12 +157,7 @@ def filter_responses(
                 continue
 
             best_text = entry["candidates"][best_c_idx].get("text", "")
-            sys_prompt = entry.get("system_prompt", "")
-
-            messages: list[dict[str, str]] = []
-            if sys_prompt:
-                messages.append({"role": "system", "content": sys_prompt})
-            messages.append({"role": "user", "content": entry.get("instruction", "")})
+            messages = list(entry.get("messages", []))
             messages.append({"role": "assistant", "content": best_text})
 
             chunk_results.append({"messages": messages})

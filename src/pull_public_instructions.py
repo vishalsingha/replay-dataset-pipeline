@@ -20,9 +20,9 @@ from src.log import setup_logging
 from src.utils import (
     append_jsonl,
     atomic_write_jsonl,
-    dedupe_exact,
-    dedupe_minhash,
+    dedupe_minhash_indices,
     load_jsonl,
+    normalize_text,
     truncate_file,
 )
 
@@ -153,7 +153,7 @@ def pull_public_instructions(config_path: str, resume: bool = False) -> None:
 
             inst = extractor(example)
             if inst and min_len <= len(inst) <= max_len:
-                collected.append({"instruction": inst})
+                collected.append({"messages": [{"role": "user", "content": inst}]})
 
             if already_collected + len(collected) >= n:
                 break
@@ -176,20 +176,35 @@ def pull_public_instructions(config_path: str, resume: bool = False) -> None:
     mh_num_perm = dedupe_cfg.get("minhash_num_perm", 128)
 
     log.info(f"Loading raw instructions from {raw_path}...")
-    raw_data = load_jsonl(raw_path)
-    all_instructions = [d.get("instruction", "") for d in raw_data if d.get("instruction")]
-    log.info(f"Total raw instructions: {len(all_instructions)}")
+    raw_data = load_jsonl(raw_path, required_key="messages")
+
+    def _user_content(entry: dict) -> str:
+        for msg in entry.get("messages", []):
+            if msg["role"] == "user":
+                return msg["content"]
+        return ""
+
+    all_texts = [_user_content(d) for d in raw_data]
+    log.info(f"Total raw instructions: {len(all_texts)}")
 
     log.info("Exact deduplication...")
-    all_instructions = dedupe_exact(all_instructions)
-    log.info(f"After exact dedupe: {len(all_instructions)}")
+    seen: set[str] = set()
+    exact_deduped: list[dict] = []
+    for entry, text in zip(raw_data, all_texts):
+        key = normalize_text(text)
+        if key and key not in seen:
+            seen.add(key)
+            exact_deduped.append(entry)
+    log.info(f"After exact dedupe: {len(exact_deduped)}")
 
     log.info(f"MinHash near-duplicate removal (threshold={mh_threshold}, num_perm={mh_num_perm})...")
-    all_instructions = dedupe_minhash(all_instructions, threshold=mh_threshold, num_perm=mh_num_perm)
-    log.info(f"After MinHash dedupe: {len(all_instructions)}")
+    deduped_texts = [_user_content(d) for d in exact_deduped]
+    keep_indices = dedupe_minhash_indices(deduped_texts, threshold=mh_threshold, num_perm=mh_num_perm)
+    final_entries = [exact_deduped[i] for i in keep_indices]
+    log.info(f"After MinHash dedupe: {len(final_entries)}")
 
-    log.info(f"Writing {len(all_instructions)} instructions to {output_path} (atomic)")
-    atomic_write_jsonl(output_path, [{"instruction": inst} for inst in all_instructions])
+    log.info(f"Writing {len(final_entries)} instructions to {output_path} (atomic)")
+    atomic_write_jsonl(output_path, final_entries)
 
     log.info("Done.")
 

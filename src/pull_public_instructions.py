@@ -29,35 +29,52 @@ from src.utils import (
 
 # ---------------------------------------------------------------------------
 # Per-dataset extraction functions
+# Each returns (instruction, system_prompt). system_prompt may be "".
 # ---------------------------------------------------------------------------
 
-def extract_openorca(example: dict) -> str | None:
+def extract_openorca(example: dict) -> tuple[str | None, str]:
     q = example.get("question", "")
-    return q.strip() if q and q.strip() else None
+    sys = example.get("system_prompt", "")
+    inst = q.strip() if q and q.strip() else None
+    return inst, sys.strip()
 
 
-def extract_openhermes(example: dict) -> str | None:
+def extract_openhermes(example: dict) -> tuple[str | None, str]:
     convs = example.get("conversations", [])
+    sys = ""
+    inst = None
     for turn in convs:
-        if turn.get("from") == "human":
-            val = turn.get("value", "")
-            return val.strip() if val and val.strip() else None
-    return None
+        role = turn.get("from", "")
+        val = turn.get("value", "")
+        if role == "system" and val and val.strip():
+            sys = val.strip()
+        elif role == "human" and val and val.strip() and inst is None:
+            inst = val.strip()
+    return inst, sys
 
 
-def extract_ultrachat(example: dict) -> str | None:
+def extract_ultrachat(example: dict) -> tuple[str | None, str]:
     p = example.get("prompt", "")
-    return p.strip() if p and p.strip() else None
+    inst = p.strip() if p and p.strip() else None
+    # ultrachat stores messages list; check for system turn
+    sys = ""
+    for msg in example.get("messages", []):
+        if msg.get("role") == "system":
+            sys = msg.get("content", "").strip()
+            break
+    return inst, sys
 
 
-def extract_codefeedback(example: dict) -> str | None:
+def extract_codefeedback(example: dict) -> tuple[str | None, str]:
     q = example.get("query", "")
-    return q.strip() if q and q.strip() else None
+    inst = q.strip() if q and q.strip() else None
+    return inst, ""
 
 
-def extract_mathinstruct(example: dict) -> str | None:
-    inst = example.get("instruction", "")
-    return inst.strip() if inst and inst.strip() else None
+def extract_mathinstruct(example: dict) -> tuple[str | None, str]:
+    inst_text = example.get("instruction", "")
+    inst = inst_text.strip() if inst_text and inst_text.strip() else None
+    return inst, ""
 
 
 EXTRACTORS = {
@@ -76,7 +93,7 @@ EXTRACTORS = {
 MAX_STREAM_ITERATIONS = 10_000_000  # #14: safety cap to prevent infinite loop
 
 
-def pull_public_instructions(config_path: str, resume: bool = False) -> None:
+def pull_public_instructions(config_path: str, output_override: str | None = None, resume: bool = False) -> None:
     cfg = load_and_validate_config(config_path)
     log = setup_logging(cfg.get("log_level", "INFO"))
 
@@ -90,7 +107,7 @@ def pull_public_instructions(config_path: str, resume: bool = False) -> None:
     min_len = pcfg.get("min_length", 10)
     max_len = pcfg.get("max_length", 2048)
 
-    output_path = Path(cfg["paths"]["public_instructions"])
+    output_path = Path(output_override) if output_override else Path(cfg["paths"]["public_instructions"])
     raw_path = output_path.with_suffix(".raw.jsonl")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -151,9 +168,13 @@ def pull_public_instructions(config_path: str, resume: bool = False) -> None:
             if rows_seen <= rows_to_skip:
                 continue
 
-            inst = extractor(example)
+            inst, sys_prompt = extractor(example)
             if inst and min_len <= len(inst) <= max_len:
-                collected.append({"messages": [{"role": "user", "content": inst}]})
+                messages: list[dict[str, str]] = [
+                    {"role": "system", "content": sys_prompt or "You are a helpful assistant."},
+                    {"role": "user", "content": inst},
+                ]
+                collected.append({"messages": messages})
 
             if already_collected + len(collected) >= n:
                 break
@@ -212,9 +233,10 @@ def pull_public_instructions(config_path: str, resume: bool = False) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Pull instructions from public HuggingFace datasets")
     parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--output", default=None, help="Override output instructions JSONL path")
     parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
     args = parser.parse_args()
-    pull_public_instructions(args.config, resume=args.resume)
+    pull_public_instructions(args.config, output_override=args.output, resume=args.resume)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,9 @@ venv/
 # Data (generated, large files — not tracked)
 data/
 
+# Logs
+logs/
+
 # Docs build output
 docs/_build/
 
@@ -33,3 +36,6 @@ Thumbs.db
 
 # Environment
 .env
+
+# Evaluation results (generated, potentially large)
+eval/results/

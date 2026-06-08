@@ -61,7 +61,7 @@ committee:
 
 # --- System Prompt Strategy (Option 2: diverse pool) ---
 replay_system_prompts:
-  - prompt: "You are a helpful assistant."
+  - prompt: ""
     weight: 2
   - prompt: "You are a helpful assistant."
     weight: 4
@@ -83,23 +83,52 @@ public_instructions:
   sources:
     - dataset: Open-Orca/OpenOrca
       split: train
-      n: 8000
+      n: 45000
       streaming: true
     - dataset: teknium/OpenHermes-2.5
       split: train
-      n: 5000
+      n: 30000
       streaming: true
     - dataset: HuggingFaceH4/ultrachat_200k
       split: train_sft
-      n: 3000
+      n: 22000
       streaming: true
     - dataset: m-a-p/CodeFeedback-Filtered-Instruction
       split: train
-      n: 1500
+      n: 12000
       streaming: true
     - dataset: TIGER-Lab/MathInstruct
       split: train
-      n: 1000
+      n: 10000
+      streaming: true
+
+# --- Public Conversations Pipeline (full system+instruction+response) ---
+# Uses the same sources as public_instructions but extracts complete conversations.
+# No generate_responses step needed — data is ready for SFT directly.
+public_conversations:
+  min_length: 10
+  max_length: 2048
+  min_response_length: 10
+  sources:
+    - dataset: Open-Orca/OpenOrca
+      split: train
+      n: 45000
+      streaming: true
+    - dataset: teknium/OpenHermes-2.5
+      split: train
+      n: 30000
+      streaming: true
+    - dataset: HuggingFaceH4/ultrachat_200k
+      split: train_sft
+      n: 22000
+      streaming: true
+    - dataset: m-a-p/CodeFeedback-Filtered-Instruction
+      split: train
+      n: 12000
+      streaming: true
+    - dataset: TIGER-Lab/MathInstruct
+      split: train
+      n: 10000
       streaming: true
 
 # --- Step 1b: Multi-Turn Generation ---
@@ -130,6 +159,7 @@ paths:
 
   public_instructions: data/public_instructions/instructions.jsonl
   public_replay: data/public_instructions/replay.jsonl
+  public_conversations: data/public_conversations/conversations.jsonl
   
   train: data/final/train.jsonl
   val: data/final/val.jsonl

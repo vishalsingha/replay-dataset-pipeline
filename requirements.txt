@@ -6,3 +6,4 @@ openai
 pydantic
 pyyaml
 tqdm
+lm-eval[vllm]

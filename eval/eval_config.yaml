@@ -36,6 +36,16 @@ suites:
     - mmlu_pro
     - arc_challenge
     - hellaswag
+    - truthfulqa
+    - toxigen
+    - halu_eval
+    - jailbreakbench
+
+  safety:
+    - truthfulqa
+    - toxigen
+    - jailbreakbench
+    - halueval
 
 # Custom benchmarks (NOT in lm-eval-harness, run via separate scripts)
 # These are documented here for reference but run independently:
@@ -44,11 +54,13 @@ suites:
 #   python -m eval.alpaca_eval_run --model <MODEL>    # AlpacaEval 2.0 (LLM-as-judge)
 #   python -m eval.livecodebench_run --model <MODEL>  # LiveCodeBench (code exec)
 #   python -m eval.ds1000_run --model <MODEL>         # DS-1000 (data science code)
+#   python -m eval.safety_bench --model <MODEL>       # HaluEval + JailbreakBench
 #
 # Requirements:
 #   MT-Bench & AlpacaEval: export OPENAI_API_KEY=<key>
 #   LiveCodeBench: git clone https://github.com/LiveCodeBench/LiveCodeBench.git && pip install -e .
 #   DS-1000: pip install ds1000
+#   JailbreakBench: pip install jailbreakbench
 
 # Per-task configuration: num_fewshot and lm-eval task name mapping
 tasks:
@@ -98,6 +110,16 @@ tasks:
     task_name: hellaswag
     num_fewshot: 10
     metric: acc_norm
+
+  truthfulqa:
+    task_name: truthfulqa_mc2
+    num_fewshot: 0
+    metric: acc
+
+  toxigen:
+    task_name: toxigen
+    num_fewshot: 0
+    metric: acc
 
 # Output settings
 output_dir: eval/results

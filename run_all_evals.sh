@@ -10,7 +10,7 @@ if [ -f .env ]; then
 fi
 
 EVAL_CMD="python -m eval.run_eval --config eval/eval_config.yaml"
-SUITE="full"  # change to "standard" or "full" for more comprehensive eval
+SUITE="full"  # change to "quick", "standard", "full", or "safety"
 BASE_MODEL="Qwen/Qwen3-4B-Instruct-2507"
 MODEL_ROOT="/home/azureuser/nvme_0/replay"
 
@@ -23,33 +23,39 @@ echo "=========================================="
 
 # 1. Base model (reference)
 echo ""
-echo "[1/5] Evaluating base model: ${BASE_MODEL}"
+echo "[1/6] Evaluating base model: ${BASE_MODEL}"
 CUDA_VISIBLE_DEVICES=0 $EVAL_CMD --model "$BASE_MODEL" --suite "$SUITE" \
     --output-file "base_qwen3_4b.json"
 
 # 2. task_only/saved_model
 echo ""
-echo "[2/5] Evaluating: task_only/saved_model"
+echo "[2/6] Evaluating: task_only/saved_model"
 CUDA_VISIBLE_DEVICES=0 $EVAL_CMD --model "${MODEL_ROOT}/task_only/saved_model" --suite "$SUITE" \
     --output-file "task_only.json"
 
 # 3. replay_task/saved_model
 echo ""
-echo "[3/5] Evaluating: replay_task/saved_model"
+echo "[3/6] Evaluating: replay_task/saved_model"
 CUDA_VISIBLE_DEVICES=0 $EVAL_CMD --model "${MODEL_ROOT}/replay_task/saved_model" --suite "$SUITE" \
     --output-file "replay_task.json"
 
 # 4. public_replay_task/saved_model
 echo ""
-echo "[4/5] Evaluating: public_replay_task/saved_model"
+echo "[4/6] Evaluating: public_replay_task/saved_model"
 CUDA_VISIBLE_DEVICES=0 $EVAL_CMD --model "${MODEL_ROOT}/public_replay_task/saved_model" --suite "$SUITE" \
     --output-file "public_replay_task.json"
 
-# 5. replay_public_replay_task (no saved_model, use latest checkpoint)
+# 5. replay_public_replay_task/saved_model
 echo ""
-echo "[5/5] Evaluating: replay_public_replay_task/checkpoint-60"
-CUDA_VISIBLE_DEVICES=0 $EVAL_CMD --model "${MODEL_ROOT}/replay_public_replay_task/checkpoint-60" --suite "$SUITE" \
+echo "[5/6] Evaluating: replay_public_replay_task/saved_model"
+CUDA_VISIBLE_DEVICES=0 $EVAL_CMD --model "${MODEL_ROOT}/replay_public_replay_task/saved_model" --suite "$SUITE" \
     --output-file "replay_public_replay_task.json"
+
+# 6. public_conv_task/saved_model
+echo ""
+echo "[6/6] Evaluating: public_conv_task/saved_model"
+CUDA_VISIBLE_DEVICES=0 $EVAL_CMD --model "${MODEL_ROOT}/public_conv_task/saved_model" --suite "$SUITE" \
+    --output-file "public_conv_task.json"
 
 echo ""
 echo "=========================================="
@@ -62,6 +68,7 @@ echo "  python -m eval.compare eval/results/base_qwen3_4b.json eval/results/task
 echo "  python -m eval.compare eval/results/base_qwen3_4b.json eval/results/replay_task.json"
 echo "  python -m eval.compare eval/results/base_qwen3_4b.json eval/results/public_replay_task.json"
 echo "  python -m eval.compare eval/results/base_qwen3_4b.json eval/results/replay_public_replay_task.json"
+echo "  python -m eval.compare eval/results/base_qwen3_4b.json eval/results/public_conv_task.json"
 
 # --- Custom Benchmarks (require OPENAI_API_KEY for MT-Bench/AlpacaEval) ---
 # Uncomment to run:
@@ -71,20 +78,42 @@ echo "  python -m eval.compare eval/results/base_qwen3_4b.json eval/results/repl
 # echo "  Custom Benchmarks (LLM-as-judge + Code)"
 # echo "=========================================="
 
-# MT-Bench (requires OPENAI_API_KEY)
+# MT-Bench (requires Azure OpenAI / OPENAI_API_KEY)
 # CUDA_VISIBLE_DEVICES=0 python -m eval.mt_bench --model "$BASE_MODEL" --output-file "mt_bench_base.json"
 # CUDA_VISIBLE_DEVICES=0 python -m eval.mt_bench --model "${MODEL_ROOT}/task_only/saved_model" --output-file "mt_bench_task_only.json"
 # CUDA_VISIBLE_DEVICES=0 python -m eval.mt_bench --model "${MODEL_ROOT}/replay_task/saved_model" --output-file "mt_bench_replay_task.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.mt_bench --model "${MODEL_ROOT}/public_replay_task/saved_model" --output-file "mt_bench_public_replay_task.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.mt_bench --model "${MODEL_ROOT}/replay_public_replay_task/saved_model" --output-file "mt_bench_replay_public_replay_task.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.mt_bench --model "${MODEL_ROOT}/public_conv_task/saved_model" --output-file "mt_bench_public_conv_task.json"
 
-# AlpacaEval 2.0 (requires OPENAI_API_KEY)
+# AlpacaEval 2.0 (requires Azure OpenAI / OPENAI_API_KEY)
 # CUDA_VISIBLE_DEVICES=0 python -m eval.alpaca_eval_run --model "$BASE_MODEL" --output-file "alpaca_base.json"
 # CUDA_VISIBLE_DEVICES=0 python -m eval.alpaca_eval_run --model "${MODEL_ROOT}/task_only/saved_model" --output-file "alpaca_task_only.json"
 # CUDA_VISIBLE_DEVICES=0 python -m eval.alpaca_eval_run --model "${MODEL_ROOT}/replay_task/saved_model" --output-file "alpaca_replay_task.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.alpaca_eval_run --model "${MODEL_ROOT}/public_replay_task/saved_model" --output-file "alpaca_public_replay_task.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.alpaca_eval_run --model "${MODEL_ROOT}/replay_public_replay_task/saved_model" --output-file "alpaca_replay_public_replay_task.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.alpaca_eval_run --model "${MODEL_ROOT}/public_conv_task/saved_model" --output-file "alpaca_public_conv_task.json"
+
+# Safety benchmarks (HaluEval + JailbreakBench)
+# CUDA_VISIBLE_DEVICES=0 python -m eval.safety_bench --model "$BASE_MODEL" --bench all --output-file "safety_base.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.safety_bench --model "${MODEL_ROOT}/task_only/saved_model" --bench all --output-file "safety_task_only.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.safety_bench --model "${MODEL_ROOT}/replay_task/saved_model" --bench all --output-file "safety_replay_task.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.safety_bench --model "${MODEL_ROOT}/public_replay_task/saved_model" --bench all --output-file "safety_public_replay_task.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.safety_bench --model "${MODEL_ROOT}/replay_public_replay_task/saved_model" --bench all --output-file "safety_replay_public_replay_task.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.safety_bench --model "${MODEL_ROOT}/public_conv_task/saved_model" --bench all --output-file "safety_public_conv_task.json"
 
 # LiveCodeBench (requires LiveCodeBench repo cloned)
 # CUDA_VISIBLE_DEVICES=0 python -m eval.livecodebench_run --model "$BASE_MODEL" --output-file "lcb_base.json"
 # CUDA_VISIBLE_DEVICES=0 python -m eval.livecodebench_run --model "${MODEL_ROOT}/task_only/saved_model" --output-file "lcb_task_only.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.livecodebench_run --model "${MODEL_ROOT}/replay_task/saved_model" --output-file "lcb_replay_task.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.livecodebench_run --model "${MODEL_ROOT}/public_replay_task/saved_model" --output-file "lcb_public_replay_task.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.livecodebench_run --model "${MODEL_ROOT}/replay_public_replay_task/saved_model" --output-file "lcb_replay_public_replay_task.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.livecodebench_run --model "${MODEL_ROOT}/public_conv_task/saved_model" --output-file "lcb_public_conv_task.json"
 
 # DS-1000 (data science code)
 # CUDA_VISIBLE_DEVICES=0 python -m eval.ds1000_run --model "$BASE_MODEL" --output-file "ds1000_base.json"
 # CUDA_VISIBLE_DEVICES=0 python -m eval.ds1000_run --model "${MODEL_ROOT}/task_only/saved_model" --output-file "ds1000_task_only.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.ds1000_run --model "${MODEL_ROOT}/replay_task/saved_model" --output-file "ds1000_replay_task.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.ds1000_run --model "${MODEL_ROOT}/public_replay_task/saved_model" --output-file "ds1000_public_replay_task.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.ds1000_run --model "${MODEL_ROOT}/replay_public_replay_task/saved_model" --output-file "ds1000_replay_public_replay_task.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.ds1000_run --model "${MODEL_ROOT}/public_conv_task/saved_model" --output-file "ds1000_public_conv_task.json"

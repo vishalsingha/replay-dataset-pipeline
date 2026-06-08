@@ -48,7 +48,7 @@ CUDA_VISIBLE_DEVICES=0 $EVAL_CMD --model "${MODEL_ROOT}/replay_public_replay_tas
 
 echo ""
 echo "=========================================="
-echo "  All evaluations complete!"
+echo "  All lm-eval evaluations complete!"
 echo "  Results saved in: eval/results/"
 echo "=========================================="
 echo ""
@@ -57,3 +57,29 @@ echo "  python -m eval.compare eval/results/base_qwen3_4b.json eval/results/task
 echo "  python -m eval.compare eval/results/base_qwen3_4b.json eval/results/replay_task.json"
 echo "  python -m eval.compare eval/results/base_qwen3_4b.json eval/results/public_replay_task.json"
 echo "  python -m eval.compare eval/results/base_qwen3_4b.json eval/results/replay_public_replay_task.json"
+
+# --- Custom Benchmarks (require OPENAI_API_KEY for MT-Bench/AlpacaEval) ---
+# Uncomment to run:
+
+# echo ""
+# echo "=========================================="
+# echo "  Custom Benchmarks (LLM-as-judge + Code)"
+# echo "=========================================="
+
+# MT-Bench (requires OPENAI_API_KEY)
+# CUDA_VISIBLE_DEVICES=0 python -m eval.mt_bench --model "$BASE_MODEL" --output-file "mt_bench_base.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.mt_bench --model "${MODEL_ROOT}/task_only/saved_model" --output-file "mt_bench_task_only.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.mt_bench --model "${MODEL_ROOT}/replay_task/saved_model" --output-file "mt_bench_replay_task.json"
+
+# AlpacaEval 2.0 (requires OPENAI_API_KEY)
+# CUDA_VISIBLE_DEVICES=0 python -m eval.alpaca_eval_run --model "$BASE_MODEL" --output-file "alpaca_base.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.alpaca_eval_run --model "${MODEL_ROOT}/task_only/saved_model" --output-file "alpaca_task_only.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.alpaca_eval_run --model "${MODEL_ROOT}/replay_task/saved_model" --output-file "alpaca_replay_task.json"
+
+# LiveCodeBench (requires LiveCodeBench repo cloned)
+# CUDA_VISIBLE_DEVICES=0 python -m eval.livecodebench_run --model "$BASE_MODEL" --output-file "lcb_base.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.livecodebench_run --model "${MODEL_ROOT}/task_only/saved_model" --output-file "lcb_task_only.json"
+
+# DS-1000 (data science code)
+# CUDA_VISIBLE_DEVICES=0 python -m eval.ds1000_run --model "$BASE_MODEL" --output-file "ds1000_base.json"
+# CUDA_VISIBLE_DEVICES=0 python -m eval.ds1000_run --model "${MODEL_ROOT}/task_only/saved_model" --output-file "ds1000_task_only.json"

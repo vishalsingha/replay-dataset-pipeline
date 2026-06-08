@@ -7,3 +7,4 @@ pydantic
 pyyaml
 tqdm
 lm-eval[vllm]
+alpaca-eval

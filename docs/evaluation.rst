@@ -3,10 +3,11 @@ Benchmark Evaluation
 
 The ``eval/`` module evaluates any HuggingFace model on standard open
 benchmarks using `lm-evaluation-harness <https://github.com/EleutherAI/lm-evaluation-harness>`_
-with a vLLM backend.
+with a vLLM backend, plus custom evaluation scripts for LLM-as-judge and
+safety benchmarks.
 
-Benchmarks
-----------
+Standard Benchmarks (lm-eval-harness)
+--------------------------------------
 
 .. list-table::
    :header-rows: 1
@@ -52,51 +53,154 @@ Benchmarks
      - HellaSwag
      - acc_norm
      - 10-shot
+   * - Truthfulness
+     - TruthfulQA (MC2)
+     - accuracy
+     - 0-shot
+   * - Safety
+     - ToxiGen
+     - accuracy
+     - 0-shot
+
+Custom Benchmarks (separate scripts)
+-------------------------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 20 30 20
+
+   * - Benchmark
+     - Script
+     - What It Measures
+     - Judge
+   * - MT-Bench
+     - ``eval.mt_bench``
+     - Multi-turn conversation quality (1-10)
+     - Azure OpenAI / GPT-4
+   * - AlpacaEval 2.0
+     - ``eval.alpaca_eval_run``
+     - Instruction-following win-rate
+     - Azure OpenAI / GPT-4
+   * - LiveCodeBench
+     - ``eval.livecodebench_run``
+     - Contamination-free code generation
+     - Test execution
+   * - DS-1000
+     - ``eval.ds1000_run``
+     - Data science code (7 Python libs)
+     - Unit tests
+   * - HaluEval
+     - ``eval.safety_bench``
+     - Hallucination detection
+     - Self-evaluation
+   * - JailbreakBench
+     - ``eval.safety_bench``
+     - Jailbreak resistance / refusal rate
+     - Pattern matching
 
 Benchmark Suites
 ----------------
 
-Three pre-defined suites with increasing coverage:
+Four pre-defined suites:
 
 - **quick** (~30 min): GSM8K, IFEval, ARC-Challenge
 - **standard** (~2-3 hours): GSM8K, MATH, HumanEval, MBPP, IFEval, MMLU, ARC-Challenge, HellaSwag
-- **full** (~4-6 hours): All benchmarks including MMLU-Pro
+- **full** (~4-6 hours): All standard + MMLU-Pro, TruthfulQA, ToxiGen
+- **safety**: TruthfulQA, ToxiGen, JailbreakBench, HaluEval
 
 Usage
 -----
 
-Run an evaluation:
+**Standard benchmarks (lm-eval-harness):**
 
 .. code-block:: bash
 
-   # Quick eval on default model (from eval/eval_config.yaml)
+   # Quick eval on default model
    CUDA_VISIBLE_DEVICES=0 python -m eval.run_eval --suite quick
 
-   # Standard suite on a fine-tuned model
-   CUDA_VISIBLE_DEVICES=0 python -m eval.run_eval --model /path/to/finetuned --suite standard
+   # Full suite on a fine-tuned model
+   CUDA_VISIBLE_DEVICES=0 python -m eval.run_eval --model /path/to/finetuned --suite full
 
-   # Full suite with explicit output filename
-   CUDA_VISIBLE_DEVICES=0 python -m eval.run_eval --model /path/to/model --suite full \
-       --output-file my_model.json
+   # Safety suite
+   CUDA_VISIBLE_DEVICES=0 python -m eval.run_eval --suite safety
 
    # Run specific tasks only
-   CUDA_VISIBLE_DEVICES=0 python -m eval.run_eval --tasks gsm8k,humaneval,ifeval
+   CUDA_VISIBLE_DEVICES=0 python -m eval.run_eval --tasks gsm8k,truthfulqa,toxigen
 
-Compare two models:
+**Custom benchmarks (LLM-as-judge):**
+
+.. code-block:: bash
+
+   # MT-Bench (uses Azure OpenAI as judge)
+   python -m eval.mt_bench --model Qwen/Qwen3-4B-Instruct-2507
+
+   # AlpacaEval 2.0
+   python -m eval.alpaca_eval_run --model Qwen/Qwen3-4B-Instruct-2507
+
+   # Generate only (no API key needed)
+   python -m eval.mt_bench --model /path/to/model --generate-only
+
+**Code benchmarks:**
+
+.. code-block:: bash
+
+   # LiveCodeBench
+   python -m eval.livecodebench_run --model Qwen/Qwen3-4B-Instruct-2507
+
+   # DS-1000
+   python -m eval.ds1000_run --model Qwen/Qwen3-4B-Instruct-2507
+
+**Safety benchmarks:**
+
+.. code-block:: bash
+
+   # HaluEval + JailbreakBench
+   python -m eval.safety_bench --model Qwen/Qwen3-4B-Instruct-2507 --bench all
+
+   # Just jailbreak testing
+   python -m eval.safety_bench --model /path/to/finetuned --bench jailbreakbench
+
+**Compare models:**
 
 .. code-block:: bash
 
    python -m eval.compare eval/results/base.json eval/results/finetuned.json
 
-   # Save comparison to JSON
-   python -m eval.compare eval/results/base.json eval/results/finetuned.json \
-       --output eval/results/comparison.json
-
-Batch evaluate all models:
+**Batch evaluate all models:**
 
 .. code-block:: bash
 
    ./run_all_evals.sh
+
+Azure OpenAI Configuration
+---------------------------
+
+For benchmarks that use LLM-as-judge (MT-Bench, AlpacaEval), create a
+``.env`` file at the project root (already gitignored):
+
+.. code-block:: bash
+
+   # .env
+   AZURE_OPENAI_API_KEY=your-key-here
+   AZURE_OPENAI_ENDPOINT=https://your-endpoint.openai.azure.com/
+   AZURE_OPENAI_API_VERSION=2024-12-01-preview
+   AZURE_OPENAI_DEPLOYMENT=gpt4omini
+
+   # These allow the OpenAI SDK to route to Azure automatically
+   OPENAI_API_KEY=your-key-here
+   OPENAI_API_TYPE=azure
+   OPENAI_API_VERSION=2024-12-01-preview
+   OPENAI_API_BASE=https://your-endpoint.openai.azure.com/
+
+The eval scripts auto-detect Azure when ``AZURE_OPENAI_API_KEY`` or
+``OPENAI_API_TYPE=azure`` is set. The ``run_all_evals.sh`` script
+automatically sources ``.env`` if present.
+
+For standard OpenAI (non-Azure), just set:
+
+.. code-block:: bash
+
+   OPENAI_API_KEY=sk-your-key-here
 
 Configuration
 -------------
@@ -136,9 +240,18 @@ Evaluation settings are in ``eval/eval_config.yaml``:
        - mmlu_pro
        - arc_challenge
        - hellaswag
+       - truthfulqa
+       - toxigen
+     safety:
+       - truthfulqa
+       - toxigen
+       - jailbreakbench
+       - halueval
 
 CLI Reference
 -------------
+
+**Standard eval (lm-eval-harness):**
 
 .. list-table::
    :header-rows: 1
@@ -155,7 +268,7 @@ CLI Reference
      - HuggingFace model ID or local path
    * - ``eval.run_eval``
      - ``--suite NAME``
-     - Suite: ``quick``, ``standard``, ``full``
+     - Suite: ``quick``, ``standard``, ``full``, ``safety``
    * - ``eval.run_eval``
      - ``--tasks LIST``
      - Comma-separated tasks (overrides ``--suite``)
@@ -172,6 +285,46 @@ CLI Reference
      - ``--output PATH``
      - Save comparison JSON
 
+**Custom benchmarks:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 25 45
+
+   * - Script
+     - Flag
+     - Description
+   * - ``eval.mt_bench``
+     - ``--model PATH``
+     - Model to evaluate (required)
+   * - ``eval.mt_bench``
+     - ``--judge-model NAME``
+     - Judge model (default: gpt-4o, auto-uses Azure deployment if configured)
+   * - ``eval.mt_bench``
+     - ``--generate-only``
+     - Only generate answers, skip judging
+   * - ``eval.alpaca_eval_run``
+     - ``--model PATH``
+     - Model to evaluate (required)
+   * - ``eval.alpaca_eval_run``
+     - ``--generate-only``
+     - Only generate outputs, skip judging
+   * - ``eval.livecodebench_run``
+     - ``--model PATH``
+     - Model to evaluate (required)
+   * - ``eval.livecodebench_run``
+     - ``--release-version VER``
+     - Dataset version (default: release_latest)
+   * - ``eval.ds1000_run``
+     - ``--model PATH``
+     - Model to evaluate (required)
+   * - ``eval.safety_bench``
+     - ``--model PATH``
+     - Model to evaluate (required)
+   * - ``eval.safety_bench``
+     - ``--bench NAME``
+     - halueval, jailbreakbench, or all
+
 Notes
 -----
 
@@ -180,5 +333,8 @@ Notes
 - **MATH** uses the ``minerva_math`` variant in lm-eval which handles LaTeX
   answer extraction.
 - **IFEval** is natively supported in lm-eval-harness v0.4+.
+- **MT-Bench/AlpacaEval** require Azure OpenAI or OpenAI API key for judging.
+  Use ``--generate-only`` to skip judging if no API key is available.
+- **LiveCodeBench** requires cloning the repo separately.
 - Results are deterministic with seed control via vLLM sampling params.
 - Results are saved as JSON in ``eval/results/`` (gitignored).

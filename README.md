@@ -86,26 +86,34 @@ train.jsonl
 replay/
 ├── config.yaml                          # All configuration (validated by pydantic at startup)
 ├── requirements.txt                     # Python dependencies
+├── run.sh                               # Main pipeline script (public track)
+├── run_all_evals.sh                     # Batch evaluate all fine-tuned models
 ├── README.md                            # This file
 ├── src/
 │   ├── __init__.py
 │   ├── config_schema.py                 # Pydantic config validation
-│   ├── log.py                           # Structured logging setup
+│   ├── log.py                           # Structured logging (stdout + file)
 │   ├── utils.py                         # Shared utilities (JSONL I/O, checkpointing, dedupe)
 │   ├── backends.py                      # vLLM + OpenAI API abstraction
 │   ├── prompts.py                       # Judge rubric for quality scoring
 │   ├── generate_instructions.py         # Step 1: self-generate instructions
 │   ├── pull_public_instructions.py      # Pull instructions from public datasets
+│   ├── pull_public_conversations.py     # Pull full conversations from public datasets
 │   ├── generate_multiturn.py            # Step 1b: multi-turn conversations
 │   ├── generate_responses.py            # Step 2: generate candidate responses
 │   ├── filter_responses.py              # Step 3: judge + filter
 │   └── mix_datasets.py                  # Step 4: mix replay + domain
+├── eval/
+│   ├── __init__.py
+│   ├── eval_config.yaml                 # Benchmark suite definitions + model config
+│   ├── run_eval.py                      # Evaluation runner (lm-eval-harness + vLLM)
+│   ├── compare.py                       # Compare results across models
+│   └── results/                         # JSON output from evaluation runs (gitignored)
+├── logs/                                # Timestamped log files (gitignored)
 └── data/
-    ├── instructions/                    # Self-generated instructions (Step 1)
-    ├── public_instructions/             # Public dataset instructions + replay
-    ├── candidates/                      # Candidate responses (Step 2)
-    ├── replay/                          # Filtered single-turn replay (Step 3)
-    ├── multiturn/                       # Multi-turn conversations (Step 1b)
+    ├── replay/                          # Self-generated replay (Track A)
+    ├── public/                          # Public dataset instructions + replay (Track B)
+    ├── public_conversations/            # Full conversations from public datasets
     └── final/                           # Mixed training data (Step 4)
 ```
 
@@ -221,6 +229,20 @@ A weighted pool of system prompts. For each instruction, one is sampled by weigh
 | `sources[].n` | Number of instructions to sample from this source | `5000` |
 | `sources[].streaming` | Stream instead of full download | `true` |
 
+### `public_conversations`
+
+Pulls complete conversations (system + instruction + response) from public datasets, ready for SFT without a separate response generation step.
+
+| Field | Description | Default |
+|---|---|---|
+| `min_length` | Drop instructions shorter than this (chars) | `10` |
+| `max_length` | Drop instructions longer than this (chars) | `2048` |
+| `min_response_length` | Drop responses shorter than this (chars) | `10` |
+| `sources[].dataset` | HuggingFace dataset ID | -- |
+| `sources[].split` | Dataset split to use | `train` |
+| `sources[].n` | Number of conversations to sample from this source | `5000` |
+| `sources[].streaming` | Stream instead of full download | `true` |
+
 ### `multiturn` (Step 1b)
 
 | Field | Description | Default |
@@ -295,6 +317,15 @@ python -m src.generate_responses --config config.yaml \
 python -m src.filter_responses --config config.yaml \
     --candidates data/public_instructions/candidates.jsonl \
     --output data/public_instructions/replay.jsonl
+```
+
+### Track C: Public Conversations (No Generation Needed)
+
+Pulls complete conversations (system + user + assistant) directly from public datasets. Since responses are included, no generate_responses or filter step is needed — data is ready for SFT immediately.
+
+```bash
+python -m src.pull_public_conversations --config config.yaml \
+    --output data/public_conversations/conversations.jsonl
 ```
 
 ### Mixing
@@ -467,7 +498,7 @@ export OPENAI_BASE_URL="https://api.openai.com/v1"  # optional
 
 ## CLI Reference
 
-Every script accepts `--config` (defaults to `config.yaml`) and `--resume`.
+Every pipeline script accepts `--config` (defaults to `config.yaml`) and `--resume`.
 
 | Script | Extra flags | Description |
 |---|---|---|
@@ -480,8 +511,24 @@ Every script accepts `--config` (defaults to `config.yaml`) and `--resume`.
 | `src.filter_responses` | `--output PATH` | Override output replay file |
 | `src.filter_responses` | `--resume` | Resume from last progress checkpoint |
 | `src.generate_multiturn` | `--resume` | Resume from last progress checkpoint |
+| `src.pull_public_instructions` | `--output PATH` | Override output instructions file |
 | `src.pull_public_instructions` | `--resume` | Resume from per-source stream position |
+| `src.pull_public_conversations` | `--output PATH` | Override output conversations file |
+| `src.pull_public_conversations` | `--resume` | Resume from per-source stream position |
 | `src.mix_datasets` | -- | Reads all paths from config |
+
+**Evaluation scripts:**
+
+| Script | Flags | Description |
+|---|---|---|
+| `eval.run_eval` | `--config PATH` | Eval config (default: `eval/eval_config.yaml`) |
+| `eval.run_eval` | `--model PATH` | HuggingFace model path (overrides config) |
+| `eval.run_eval` | `--suite NAME` | Benchmark suite: `quick`, `standard`, `full` |
+| `eval.run_eval` | `--tasks LIST` | Comma-separated task list (overrides `--suite`) |
+| `eval.run_eval` | `--output-file NAME` | Explicit output filename |
+| `eval.run_eval` | `--output-dir DIR` | Output directory (default: `eval/results`) |
+| `eval.compare` | `result_a result_b` | Two result JSON paths (positional, supports globs) |
+| `eval.compare` | `--output PATH` | Save comparison JSON to file |
 
 ---
 
@@ -535,10 +582,21 @@ Just add `--resume` to the same command. All scripts checkpoint progress to disk
 
 ## Logging
 
-All output uses structured logging with timestamps and levels:
+All output uses structured logging with timestamps and levels. Logs are written to both stdout and timestamped files under `logs/`:
 
 ```
-[2026-06-04 06:50:12] INFO    Loading model: Qwen/Qwen3-4B-Instruct-2507 (tensor_parallel_size=2)
+logs/
+├── generate_instructions_20260604_065012.log
+├── generate_responses_20260604_070115.log
+├── filter_responses_20260604_073022.log
+└── pull_public_instructions_20260604_080512.log
+```
+
+Example output:
+
+```
+[2026-06-04 06:50:12] INFO    Logging to logs/generate_instructions_20260604_065012.log
+[2026-06-04 06:50:12] INFO    Loading model: Qwen/Qwen3-4B-Instruct-2507 (tensor_parallel_size=1)
 [2026-06-04 06:50:15] INFO    Generating 5000 instructions in chunks of 5000...
 [2026-06-04 06:51:02] WARNING malformed JSON at data/candidates/candidates.jsonl:4231, skipping
 ```

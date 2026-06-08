@@ -165,11 +165,47 @@ Paths
 .. code-block:: yaml
 
    paths:
-     instructions: data/instructions/instructions.jsonl
+     instructions: data/replay/instructions.jsonl
      public_instructions: data/public_instructions/instructions.jsonl
-     candidates: data/candidates/candidates.jsonl
+     public_conversations: data/public_conversations/conversations.jsonl
+     candidates: data/replay/candidates.jsonl
      replay: data/replay/replay.jsonl
      public_replay: data/public_instructions/replay.jsonl
-     multiturn: data/multiturn/multiturn.jsonl
+     multiturn: data/replay/multiturn.jsonl
      train: data/final/train.jsonl
      val: data/final/val.jsonl
+
+Public Conversations
+--------------------
+
+Pulls complete conversations (system + instruction + response) from public
+datasets. No response generation step needed — data is ready for SFT directly.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 50 20
+
+   * - Field
+     - Description
+     - Default
+   * - ``public_conversations.min_length``
+     - Drop instructions shorter than this (chars)
+     - ``10``
+   * - ``public_conversations.max_length``
+     - Drop instructions longer than this (chars)
+     - ``2048``
+   * - ``public_conversations.min_response_length``
+     - Drop responses shorter than this (chars)
+     - ``10``
+   * - ``public_conversations.sources[].dataset``
+     - HuggingFace dataset ID
+     - --
+   * - ``public_conversations.sources[].split``
+     - Dataset split
+     - ``train``
+   * - ``public_conversations.sources[].n``
+     - Number of conversations to sample
+     - --
+   * - ``public_conversations.sources[].streaming``
+     - Stream instead of full download
+     - ``true``

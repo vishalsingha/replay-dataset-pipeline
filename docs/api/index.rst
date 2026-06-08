@@ -14,4 +14,5 @@ API Reference
    filter_responses
    generate_multiturn
    pull_public_instructions
+   pull_public_conversations
    mix_datasets

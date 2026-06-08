@@ -118,3 +118,28 @@ Supported datasets:
 .. code-block:: bash
 
    python -m src.pull_public_instructions --config config.yaml
+
+Public Conversations Pipeline
+-----------------------------
+
+Pulls complete conversations (system + instruction + response) directly from
+public HuggingFace datasets. Unlike the instructions pipeline, this extracts
+the full conversation — no ``generate_responses`` or ``filter_responses`` step
+is needed. Data is ready for SFT immediately.
+
+Uses the same sources as ``public_instructions`` but retains the original
+responses alongside the instructions.
+
+.. code-block:: bash
+
+   python -m src.pull_public_conversations --config config.yaml \
+       --output data/public_conversations/conversations.jsonl
+
+Evaluation
+----------
+
+The ``eval/`` module evaluates any HuggingFace model on standard open
+benchmarks using `lm-evaluation-harness <https://github.com/EleutherAI/lm-evaluation-harness>`_
+with a vLLM backend.
+
+See :doc:`evaluation` for full details on running benchmarks and comparing models.

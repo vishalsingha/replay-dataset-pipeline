@@ -15,5 +15,7 @@ distribution** and synthesizes high-quality responses from it.
    quickstart
    pipeline
    configuration
+   evaluation
+   results
    api/index
    troubleshooting

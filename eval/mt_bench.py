@@ -79,10 +79,21 @@ def generate_answers(model_path: str, questions: list[dict], tp_size: int = 1) -
 
 
 def judge_answers(answers: list[dict], judge_model: str = "gpt-4o") -> list[dict]:
-    """Score answers using LLM-as-judge."""
-    from openai import OpenAI
+    """Score answers using LLM-as-judge (supports OpenAI and Azure OpenAI)."""
+    if os.environ.get("OPENAI_API_TYPE") == "azure" or os.environ.get("AZURE_OPENAI_API_KEY"):
+        from openai import AzureOpenAI
+        client = AzureOpenAI(
+            api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
+            api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"),
+            azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
+        )
+        judge_model = os.environ.get("AZURE_OPENAI_DEPLOYMENT", judge_model)
+        print(f"  Using Azure OpenAI judge: {judge_model}")
+    else:
+        from openai import OpenAI
+        client = OpenAI()
+        print(f"  Using OpenAI judge: {judge_model}")
 
-    client = OpenAI()
     results = []
 
     judge_prompt_template = """Please act as an impartial judge and evaluate the quality of the response provided by an AI assistant to the user question displayed below. Your evaluation should consider factors including helpfulness, relevance, accuracy, depth, creativity, and level of detail of the response. Begin your evaluation by providing a short explanation. Be as objective as possible. After providing your explanation, you must rate the response on a scale of 1 to 10 by strictly following this format: "[[rating]]", for example: "Rating: [[5]]".

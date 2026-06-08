@@ -4,6 +4,11 @@
 
 set -e
 
+# Load API keys from .env if present
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+fi
+
 EVAL_CMD="python -m eval.run_eval --config eval/eval_config.yaml"
 SUITE="full"  # change to "standard" or "full" for more comprehensive eval
 BASE_MODEL="Qwen/Qwen3-4B-Instruct-2507"

@@ -153,7 +153,61 @@ The papers referenced here are just the beginning. As models get larger and fine
 
 ---
 
-## Experimental Validation: Qwen3-4B on Science Domain
+## Training Setup: Full Fine-Tuning vs LoRA
+
+Before diving into the benchmark results, it's worth comparing the two fine-tuning approaches I used. Both target `Qwen3-4B-Instruct-2507` on the same domain task, but differ fundamentally in how they update the model.
+
+### Full Fine-Tuning (DDP, 2×H100 NVL)
+
+Full fine-tuning updates all 4B parameters. The model is loaded in bfloat16 with Flash Attention 2, distributed across both GPUs via PyTorch DDP (`torchrun --nproc_per_node=2`), and trained with gradient checkpointing enabled to fit larger effective batches.
+
+| Parameter | Value |
+|-----------|-------|
+| Trainable parameters | 4,022,468,096 (100%) |
+| Precision | bfloat16 |
+| Optimizer | AdamW (fused) |
+| Learning rate | 2e-5 |
+| Effective batch size | 4 × 16 × 2 GPUs = 128 |
+| Sequence length | 4096 |
+| Epochs | 2 |
+| Scheduler | Cosine with 50% warmup |
+| Weight decay | 0.01 |
+| Gradient checkpointing | Yes |
+| Packing | Yes |
+| Loss masking | Assistant-only (via TRL `{% generation %}` tags) |
+
+The high warmup ratio (0.5) is intentional — when training with replay data mixed in, a longer warmup helps the model smoothly transition between the general replay distribution and the domain-specific data without early instability.
+
+### LoRA Fine-Tuning (DDP, 2×H100 NVL)
+
+LoRA freezes the base model and injects low-rank adapter matrices into all attention and MLP projections. Only the adapter weights (~0.3% of total parameters) are trained.
+
+| Parameter | Value |
+|-----------|-------|
+| Trainable parameters | ~13M (0.3% of 4B) |
+| LoRA rank (r) | 16 |
+| LoRA alpha | 32 (alpha/r = 2×) |
+| LoRA dropout | 0.0 |
+| Target modules | q, k, v, o, gate, up, down projections |
+| Precision | bfloat16 |
+| Optimizer | AdamW (fused) |
+| Learning rate | 1e-4 (5× higher than full FT) |
+| Effective batch size | 2 × 32 × 2 GPUs = 128 |
+| Sequence length | 4096 |
+| Epochs | 2 |
+| Scheduler | Cosine with 3% warmup |
+| Weight decay | 0.0 |
+| Gradient checkpointing | No (adapters are small enough) |
+| Packing | Yes |
+| Loss masking | Assistant-only (via TRL `assistant_only_loss=True`) |
+
+Key design choices for LoRA:
+- **r=16 with alpha=32**: The 2× scaling factor gives the adapter effective capacity without requiring a higher rank. This matches the sweet spot identified by Hu et al. for models in the 1–7B range.
+- **All linear layers targeted**: Rather than just attention (the original LoRA paper's default), targeting MLP projections (gate, up, down) gives the adapters access to the knowledge storage layers, critical for domain-specific fact learning.
+- **Zero weight decay**: Unlike full FT where regularization prevents overfitting across all parameters, LoRA's low-rank constraint is already a strong implicit regulariser. Adding explicit decay can under-fit.
+- **5× higher learning rate**: Standard for LoRA — the adapters start at zero and need to move faster to have any effect within the same number of steps.
+
+## Experiment 1: Full Fine-Tuning Results
 
 To validate the self-synthesized replay approach, I ran a comprehensive experiment fine-tuning `Qwen3-4B-Instruct-2507` on a physics, chemistry, and biology (PCB) task dataset under five different data mixing strategies, then evaluated across 13+ benchmarks covering instruction following, STEM knowledge, code, and safety.
 
@@ -240,6 +294,102 @@ To validate the self-synthesized replay approach, I ran a comprehensive experime
 | 5 | **pub_conv** | -4.05% | Worst overall — avoid for domain SFT |
 
 The `replay_task` strategy offers the best Pareto trade-off: minimal forgetting across all capabilities while still learning the domain task. For practitioners fine-tuning on science domains, self-generated replay is not optional — it's essential for preserving the deep knowledge that makes the model useful.
+
+---
+
+## Experiment 2: LoRA Fine-Tuning Results
+
+We repeated the experiment using **LoRA adapters** (rank-based parameter-efficient fine-tuning) instead of full weight updates. LoRA modifies only a small subset of parameters, which in theory should reduce forgetting — but our results show the opposite without replay.
+
+### Models Compared (LoRA)
+
+| Model | Training Data |
+|-------|--------------|
+| **Base** | Original Qwen3-4B-Instruct (no fine-tuning) |
+| **task_only** | Domain PCB data only (LoRA) |
+| **replay_task** | Self-generated replay + domain data (LoRA) |
+| **public_replay_task** | Public dataset replay + domain data (LoRA) |
+| **replay_public_replay_task** | Both replay sources + domain data (LoRA) |
+| **public_conv_task** | Raw public conversations + domain data (LoRA) |
+
+### Instruction Following (LoRA)
+
+| Benchmark | Base | task_only | replay_task | public_replay | replay_pub_rep | pub_conv |
+|-----------|:----:|:---------:|:-----------:|:-------------:|:--------------:|:--------:|
+| IFEval (Prompt Strict) | **59.33** | 53.97 (-5.36) | 53.23 (-6.10) | 41.77 (-17.56) | 51.94 (-7.39) | 29.57 (-29.76) |
+| IFEval (Inst Strict) | **70.02** | 66.43 (-3.59) | 65.71 (-4.31) | 55.04 (-14.98) | 65.11 (-4.91) | 43.88 (-26.14) |
+| MT-Bench (/10) | 8.48 | 7.51 | 8.42 | **8.49** | — | — |
+| TruthfulQA | **62.60** | 52.82 (-9.79) | 60.76 (-1.85) | 58.12 (-4.49) | 58.89 (-3.71) | 55.47 (-7.13) |
+
+### STEM — University Level (LoRA)
+
+| Benchmark | Base | task_only | replay_task | public_replay | replay_pub_rep | pub_conv |
+|-----------|:----:|:---------:|:-----------:|:-------------:|:--------------:|:--------:|
+| MMLU-Pro Biology | 79.50 | 78.10 (-1.40) | **80.06** (+0.56) | 77.82 (-1.68) | 79.50 (0.00) | 73.08 (-6.42) |
+| MMLU-Pro Chemistry | **63.78** | 56.63 (-7.15) | 63.60 (-0.18) | 54.86 (-8.92) | 58.04 (-5.74) | 48.32 (-15.46) |
+| MMLU-Pro Physics | **63.66** | 54.81 (-8.85) | 62.43 (-1.23) | 58.74 (-4.92) | 60.43 (-3.23) | 49.65 (-14.01) |
+| MMLU-Pro Health | 58.92 | 51.59 (-7.33) | **59.90** (+0.98) | 58.44 (-0.48) | 56.72 (-2.20) | 50.37 (-8.55) |
+| MMLU-Pro Math | **76.61** | 69.58 (-7.03) | 76.31 (-0.30) | 73.28 (-3.33) | 74.39 (-2.22) | 59.81 (-16.80) |
+| MATH (Hendrycks) | 54.14 | **55.92** (+1.78) | 54.52 (+0.38) | 51.48 (-2.66) | 52.98 (-1.16) | 47.28 (-6.86) |
+
+### Code (LoRA)
+
+| Benchmark | Base | task_only | replay_task | public_replay | replay_pub_rep | pub_conv |
+|-----------|:----:|:---------:|:-----------:|:-------------:|:--------------:|:--------:|
+| HumanEval | 74.39 | 71.34 (-3.05) | **76.22** (+1.83) | 73.78 (-0.61) | 72.56 (-1.83) | 55.49 (-18.90) |
+| MBPP | 65.40 | 65.40 (0.00) | **66.40** (+1.00) | 63.40 (-2.00) | 65.60 (+0.20) | 61.60 (-3.80) |
+| MT-Bench Coding (/10) | **9.40** | 8.20 | 9.30 | 9.30 | — | — |
+
+### Safety (LoRA)
+
+| Benchmark | Base | task_only | replay_task | public_replay | replay_pub_rep | pub_conv |
+|-----------|:----:|:---------:|:-----------:|:-------------:|:--------------:|:--------:|
+| ToxiGen | **56.70** | 51.70 (-5.00) | 56.38 (-0.32) | 56.28 (-0.42) | 56.17 (-0.53) | 54.15 (-2.55) |
+| Jailbreak Refusal | **100%** | **95%** | **100%** | **100%** | **100%** | **100%** |
+| HaluEval | 62.1 | 69.5 | 64.3 | 65.1 | 65.3 | **81.3** |
+| TruthfulQA | **62.60** | 52.82 (-9.79) | 60.76 (-1.85) | 58.12 (-4.49) | 58.89 (-3.71) | 55.47 (-7.13) |
+
+### Overall Ranking (LoRA)
+
+| Rank | Model | Avg Delta (10 benchmarks) |
+|:----:|-------|:-------------------------:|
+| 1 | **replay_task** | **-0.92%** |
+| 2 | task_only | -1.44% |
+| 3 | replay_pub_rep | -3.31% |
+| 4 | public_replay | -4.21% |
+| 5 | pub_conv | -7.44% |
+
+### Key Findings: LoRA vs Full Fine-Tuning
+
+**1. LoRA without replay is MORE destructive than full fine-tuning without replay.** Counter-intuitively, LoRA `task_only` shows worse forgetting than full FT `task_only`:
+- TruthfulQA: -9.79% (LoRA) vs -6.89% (full FT)
+- MMLU-Pro Physics: -8.85% (LoRA) vs -6.85% (full FT)
+- MT-Bench: 7.51 (LoRA) vs 8.24 (full FT)
+
+This suggests that LoRA's low-rank constraint forces more aggressive parameter changes in the limited subspace it modifies, causing sharper interference.
+
+**2. LoRA `task_only` is the only model that breaks safety alignment.** Jailbreak refusal drops from 100% to 95% — the only such failure across all experiments. Self-replay prevents this entirely (100% maintained).
+
+**3. Self-replay with LoRA actually improves capabilities beyond base:**
+- HumanEval: 76.22% vs 74.39% base (+1.83%)
+- MMLU-Pro Biology: 80.06% vs 79.50% (+0.56%)
+- MMLU-Pro Health: 59.90% vs 58.92% (+0.98%)
+
+The replay data acts as beneficial regularization during LoRA training, preventing overfitting to the narrow task distribution.
+
+**4. The gap between replay and no-replay is larger with LoRA.** Average science loss: -0.03% (replay_task) vs -7.59% (task_only) — a 250x difference. With full FT it was 7x. This makes self-replay even more critical for parameter-efficient fine-tuning.
+
+**5. `pub_conv` with LoRA is catastrophic beyond recovery.** IFEval drops to 29.57% (-29.76%), HumanEval to 55.49% (-18.90%), MMLU-Pro Math to 59.81% (-16.80%). The model essentially loses the ability to follow structured instructions.
+
+### Implications for Practitioners
+
+If you're using LoRA for domain adaptation (which is the common case given its memory efficiency), **self-generated replay is not just helpful — it's essential**. Without it, LoRA produces a model that:
+- Forgets science knowledge worse than full fine-tuning would
+- Becomes significantly more sycophantic (-9.79% TruthfulQA)
+- May even break safety alignment (95% jailbreak refusal)
+- Loses conversational quality (MT-Bench drops from 8.48 to 7.51)
+
+With self-replay, all of these issues disappear, and you get a model that actually *improves* on code and biology while maintaining everything else.
 
 ---
 

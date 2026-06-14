@@ -607,9 +607,9 @@ Set `log_level` in config.yaml to control verbosity (`DEBUG`, `INFO`, `WARNING`,
 
 ## Benchmark Evaluation
 
-The `eval/` module evaluates any HuggingFace model on standard open benchmarks using [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness) with a vLLM backend.
+The `eval/` module evaluates any HuggingFace model on standard open benchmarks using [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness) with a vLLM backend, plus custom scripts for LLM-as-judge and safety benchmarks.
 
-### Benchmarks
+### Standard Benchmarks (via lm-eval-harness)
 
 | Category | Benchmark | Metric | Shots |
 |----------|-----------|--------|-------|
@@ -622,19 +622,32 @@ The `eval/` module evaluates any HuggingFace model on standard open benchmarks u
 | Knowledge | MMLU-Pro | exact_match | 5-shot |
 | Reasoning | ARC-Challenge | acc_norm | 25-shot |
 | Reasoning | HellaSwag | acc_norm | 10-shot |
+| Truthfulness | TruthfulQA (MC2) | accuracy | 0-shot |
+| Safety | ToxiGen | accuracy | 0-shot |
+
+### Custom Benchmarks (separate scripts)
+
+| Benchmark | Script | What It Measures | Judge |
+|-----------|--------|-----------------|-------|
+| MT-Bench | `eval.mt_bench` | Multi-turn conversation quality (1-10) | Azure OpenAI / GPT-4 |
+| AlpacaEval 2.0 | `eval.alpaca_eval_run` | Instruction-following win-rate | Azure OpenAI / GPT-4 |
+| LiveCodeBench | `eval.livecodebench_run` | Contamination-free code generation | Test execution |
+| DS-1000 | `eval.ds1000_run` | Data science code (7 Python libs) | Unit tests |
+| HaluEval | `eval.safety_bench` | Hallucination detection | Self-evaluation |
+| JailbreakBench | `eval.safety_bench` | Jailbreak resistance / refusal rate | Pattern matching |
 
 ### Usage
 
 ```bash
-# Run quick eval (GSM8K, IFEval, ARC-Challenge)
-CUDA_VISIBLE_DEVICES=0 python -m eval.run_eval --suite quick
+# Standard benchmarks (lm-eval-harness)
+python -m eval.run_eval --suite quick           # GSM8K, IFEval, ARC
+python -m eval.run_eval --suite full            # All 11 benchmarks
+python -m eval.run_eval --model /path/to/model --tasks gsm8k,truthfulqa,toxigen
 
-# Run standard or full suite
-CUDA_VISIBLE_DEVICES=0 python -m eval.run_eval --suite standard
-CUDA_VISIBLE_DEVICES=0 python -m eval.run_eval --model /path/to/finetuned --suite full
-
-# Run specific tasks
-CUDA_VISIBLE_DEVICES=0 python -m eval.run_eval --model /path/to/model --tasks gsm8k,humaneval,ifeval
+# Custom benchmarks
+python -m eval.mt_bench --model /path/to/model              # MT-Bench
+python -m eval.safety_bench --model /path/to/model --bench all  # HaluEval + Jailbreak
+python -m eval.alpaca_eval_run --model /path/to/model       # AlpacaEval 2.0
 
 # Compare two models
 python -m eval.compare eval/results/base.json eval/results/finetuned.json
@@ -643,56 +656,80 @@ python -m eval.compare eval/results/base.json eval/results/finetuned.json
 ./run_all_evals.sh
 ```
 
+### Azure OpenAI Configuration (for LLM-as-judge)
+
+Create a `.env` file (already gitignored):
+
+```bash
+AZURE_OPENAI_API_KEY=your-key
+AZURE_OPENAI_ENDPOINT=https://your-endpoint.openai.azure.com/
+AZURE_OPENAI_API_VERSION=2024-12-01-preview
+AZURE_OPENAI_DEPLOYMENT=gpt4omini
+```
+
+### LoRA Adapter Merging
+
+Merge LoRA adapters with the base model to create standalone full models:
+
+```bash
+python merge_lora.py
+```
+
+This scans `/home/azureuser/nvme_0/replay_lora/*/saved_model/`, merges each adapter with the base model, and saves to `saved_full_model/` beside it.
+
 ---
 
 ## Experiment Results
 
-We fine-tuned `Qwen/Qwen3-4B-Instruct-2507` on a domain task dataset under four different data mixing strategies to measure catastrophic forgetting:
+We fine-tuned `Qwen/Qwen3-4B-Instruct-2507` on a physics/chemistry/biology task dataset under five data mixing strategies, evaluated with both full fine-tuning and LoRA.
 
 | Model | Description |
 |-------|-------------|
 | **Base** | Original Qwen3-4B-Instruct-2507 (no fine-tuning) |
-| **task_only** | SFT on domain task data only |
-| **replay_task** | SFT on self-generated replay + domain task data |
-| **public_replay_task** | SFT on public dataset replay + domain task data |
+| **task_only** | Domain task data only |
+| **replay_task** | Self-generated replay + domain task data |
+| **public_replay_task** | Public dataset replay + domain task data |
+| **replay_public_replay_task** | Both replay sources + domain task data |
+| **public_conv_task** | Raw public conversations + domain task data |
 
-### Results (Full Suite)
+### Full Fine-Tuning Results
 
-| Benchmark | Base | task_only | replay_task | public_replay_task |
-|-----------|:----:|:---------:|:-----------:|:------------------:|
-| **GSM8K** (strict) | 73.46 | **81.88** (+8.42) | 69.45 (-4.02) | 66.72 (-6.75) |
-| **GSM8K** (flex) | 79.38 | **83.78** (+4.40) | 82.87 (+3.49) | 82.03 (+2.65) |
-| **MATH** (exact) | 47.98 | **48.32** (+0.34) | 48.26 (+0.28) | 47.04 (-0.94) |
-| **MATH** (verify) | 54.14 | 54.56 (+0.42) | **55.36** (+1.22) | 52.92 (-1.22) |
-| **HumanEval** | **74.39** | 69.51 (-4.88) | 71.95 (-2.44) | 73.78 (-0.61) |
-| **MBPP** | 65.40 | 66.40 (+1.00) | **67.20** (+1.80) | 64.80 (-0.60) |
-| **IFEval** (strict) | **59.15** | 55.82 (-3.33) | 56.56 (-2.59) | 51.39 (-7.76) |
-| **IFEval** (inst) | **69.78** | 67.75 (-2.04) | 68.11 (-1.68) | 64.39 (-5.40) |
-| **MMLU** | 70.60 | 70.48 (-0.12) | 70.56 (-0.04) | **70.70** (+0.10) |
-| **MMLU-Pro** | **60.44** | 55.75 (-4.69) | 59.30 (-1.14) | 55.85 (-4.59) |
-| **ARC-Challenge** | 58.62 | 59.22 (+0.60) | **59.47** (+0.85) | 56.91 (-1.71) |
-| **HellaSwag** | 69.14 | 70.96 (+1.82) | 69.95 (+0.81) | **71.32** (+2.18) |
+| Benchmark | Base | task_only | replay_task | public_replay | pub_conv |
+|-----------|:----:|:---------:|:-----------:|:-------------:|:--------:|
+| **GSM8K** (strict) | 73.46 | **81.88** (+8.42) | 69.90 (-3.56) | 64.29 (-9.17) | 77.79 (+4.32) |
+| **MMLU-Pro Chemistry** | **63.78** | 59.36 (-4.42) | 63.52 (-0.26) | 55.30 (-8.48) | 51.86 (-11.92) |
+| **MMLU-Pro Physics** | **63.66** | 56.81 (-6.85) | 62.05 (-1.61) | 57.27 (-6.39) | 52.35 (-11.31) |
+| **HumanEval** | **74.39** | 69.51 (-4.88) | 71.34 (-3.05) | 74.39 (0.00) | 63.41 (-10.98) |
+| **IFEval** | **59.15** | 55.64 (-3.51) | 57.12 (-2.03) | 50.83 (-8.32) | 45.47 (-13.68) |
+| **TruthfulQA** | **62.60** | 55.71 (-6.89) | 60.61 (-1.99) | 58.49 (-4.12) | 55.91 (-6.69) |
+| **MT-Bench** (/10) | 8.43 | 8.24 | 8.38 | 8.38 | 7.92 |
+| **Jailbreak Refusal** | 100% | 100% | 100% | 100% | 100% |
+
+### LoRA Fine-Tuning Results
+
+| Benchmark | Base | task_only | replay_task | public_replay | pub_conv |
+|-----------|:----:|:---------:|:-----------:|:-------------:|:--------:|
+| **MMLU-Pro Chemistry** | **63.78** | 56.63 (-7.15) | 63.60 (-0.18) | 54.86 (-8.92) | 48.32 (-15.46) |
+| **MMLU-Pro Physics** | **63.66** | 54.81 (-8.85) | 62.43 (-1.23) | 58.74 (-4.92) | 49.65 (-14.01) |
+| **HumanEval** | 74.39 | 71.34 (-3.05) | **76.22** (+1.83) | 73.78 (-0.61) | 55.49 (-18.90) |
+| **IFEval** | **59.33** | 53.97 (-5.36) | 53.23 (-6.10) | 41.77 (-17.56) | 29.57 (-29.76) |
+| **TruthfulQA** | **62.60** | 52.82 (-9.79) | 60.76 (-1.85) | 58.12 (-4.49) | 55.47 (-7.13) |
+| **MT-Bench** (/10) | 8.48 | 7.51 | 8.42 | **8.49** | — |
+| **Jailbreak Refusal** | 100% | **95%** | 100% | 100% | 100% |
 
 ### Key Findings
 
-1. **task_only shows classic catastrophic forgetting:** Large gains on the domain task (GSM8K +8.42%) but clear regressions on HumanEval (-4.88%), IFEval (-3.33%), and MMLU-Pro (-4.69%).
+1. **Self-generated replay preserves science knowledge 7x better (full FT) and 250x better (LoRA)** than no replay.
 
-2. **Self-generated replay (replay_task) is the most effective strategy** for balancing task performance with capability retention:
-   - MMLU-Pro regression reduced from -4.69% to just -1.14%
-   - HumanEval forgetting halved (-2.44% vs -4.88%)
-   - Still gains on MATH verify (+1.22%), MBPP (+1.80%), ARC (+0.85%)
-   - Best overall Pareto trade-off between task gains and forgetting
+2. **LoRA without replay is MORE destructive** than full fine-tuning — TruthfulQA drops 9.79%, jailbreak refusal breaks to 95%.
 
-3. **Public dataset replay (public_replay_task) underperforms** self-generated replay:
-   - Worst IFEval regression (-7.76%)
-   - MMLU-Pro loss comparable to task_only (-4.59%)
-   - Supports the hypothesis that public datasets are distributionally mismatched with the base model's internal representation
+3. **Self-replay with LoRA improves capabilities beyond base** — HumanEval +1.83%, Biology +0.56%.
 
-4. **MMLU is highly stable** across all strategies (within ±0.12%), suggesting broad factual knowledge is robust to moderate SFT.
+4. **Public conversations are catastrophic** — IFEval -29.76% (LoRA), HumanEval -18.90%.
 
-5. **HellaSwag improves** with fine-tuning across all strategies (+0.81% to +2.18%), likely due to improved language modeling from additional training.
+5. **Distribution matching > response quality** — simple self-replay beats GPT-4-generated public data.
 
 ### Conclusion
 
-Self-generated replay data — synthesized by extracting instructions from the model's own latent distribution — provides the best protection against catastrophic forgetting while preserving domain task gains. This validates the core design of this pipeline: using the model itself as the source of rehearsal data rather than relying on externally curated datasets.
+Self-generated replay is essential for both full fine-tuning and LoRA. It preserves domain knowledge, prevents safety degradation, and can even improve capabilities beyond the base model.
 

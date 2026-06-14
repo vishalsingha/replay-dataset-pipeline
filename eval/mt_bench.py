@@ -54,26 +54,53 @@ def generate_answers(model_path: str, questions: list[dict], tp_size: int = 1) -
     sampling = SamplingParams(temperature=0.7, top_p=0.9, max_tokens=2048)
 
     answers = []
+    # Batch turn 1 (all questions are independent)
+    turn1_prompts = []
     for q in questions:
-        turns = q["turns"]
-        conversation = []
-        model_responses = []
+        conversation = [{"role": "user", "content": q["turns"][0]}]
+        prompt = tokenizer.apply_chat_template(conversation, tokenize=False, add_generation_prompt=True)
+        turn1_prompts.append(prompt)
 
-        for turn_idx, turn_text in enumerate(turns):
-            conversation.append({"role": "user", "content": turn_text})
+    print(f"  Generating turn 1 for {len(questions)} questions (batched)...")
+    turn1_outputs = llm.generate(turn1_prompts, sampling)
+
+    # Batch turn 2 (depends on turn 1 responses)
+    turn2_prompts = []
+    turn2_indices = []
+    for i, (q, output) in enumerate(zip(questions, turn1_outputs)):
+        if len(q["turns"]) > 1:
+            response1 = output.outputs[0].text.strip()
+            conversation = [
+                {"role": "user", "content": q["turns"][0]},
+                {"role": "assistant", "content": response1},
+                {"role": "user", "content": q["turns"][1]},
+            ]
             prompt = tokenizer.apply_chat_template(conversation, tokenize=False, add_generation_prompt=True)
-            output = llm.generate([prompt], sampling)[0]
-            response = output.outputs[0].text.strip()
-            model_responses.append(response)
-            conversation.append({"role": "assistant", "content": response})
+            turn2_prompts.append(prompt)
+            turn2_indices.append(i)
+
+    turn2_outputs = {}
+    if turn2_prompts:
+        print(f"  Generating turn 2 for {len(turn2_prompts)} questions (batched)...")
+        turn2_results = llm.generate(turn2_prompts, sampling)
+        for idx, output in zip(turn2_indices, turn2_results):
+            turn2_outputs[idx] = output.outputs[0].text.strip()
+
+    # Assemble answers
+    for i, (q, t1_output) in enumerate(zip(questions, turn1_outputs)):
+        response1 = t1_output.outputs[0].text.strip()
+        model_responses = [response1]
+        if i in turn2_outputs:
+            model_responses.append(turn2_outputs[i])
 
         answers.append({
             "question_id": q["question_id"],
             "category": q["category"],
-            "turns": turns,
+            "turns": q["turns"],
             "model_responses": model_responses,
         })
-        print(f"  [{len(answers)}/{len(questions)}] Q{q['question_id']} ({q['category']})")
+
+    print(f"  Generated answers for {len(answers)} questions")
 
     return answers
 

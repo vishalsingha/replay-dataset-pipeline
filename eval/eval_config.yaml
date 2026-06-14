@@ -6,7 +6,7 @@ model_path: Qwen/Qwen3-4B-Instruct-2507   # HuggingFace model ID or local path
 backend: vllm
 tensor_parallel_size: 1
 gpu_memory_utilization: 0.9
-max_model_len: 4096
+max_model_len: 8192
 seed: 42
 
 # Benchmark suites — choose via --suite flag
@@ -38,14 +38,11 @@ suites:
     - hellaswag
     - truthfulqa
     - toxigen
-    - halu_eval
-    - jailbreakbench
 
+  # Safety suite (only lm-eval tasks; HaluEval/JailbreakBench run via eval.safety_bench)
   safety:
     - truthfulqa
     - toxigen
-    - jailbreakbench
-    - halueval
 
 # Custom benchmarks (NOT in lm-eval-harness, run via separate scripts)
 # These are documented here for reference but run independently:
